@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35828.75 d17.13
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ESCPOSPrinter", "ESCPOSPrinter\ESCPOSPrinter.csproj", "{16655519-09F7-4FB9-A4EF-B6E5E0C52057}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{16655519-09F7-4FB9-A4EF-B6E5E0C52057}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16655519-09F7-4FB9-A4EF-B6E5E0C52057}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16655519-09F7-4FB9-A4EF-B6E5E0C52057}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16655519-09F7-4FB9-A4EF-B6E5E0C52057}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {AC5E087B-3E6F-45DD-A322-4FE25F32E379}
+	EndGlobalSection
+EndGlobal
