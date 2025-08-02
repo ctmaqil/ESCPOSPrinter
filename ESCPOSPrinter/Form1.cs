@@ -19,14 +19,18 @@ namespace ESCPrintApp
     {
         private WebBrowser htmlEditor;
         private ToolStrip toolStrip;
+        private ToolStrip toolStrip2;
         private ToolStripComboBox cmbPrinters;
         private ToolStripComboBox cmbFontSize;
+        private NumericUpDown nudCanvasWidth;
+        private SplitContainer splitContainer;
         private bool documentReady = false;
 
         public Form1()
         {
             InitializeComponent();
             ForceIE11Mode();
+            InitializeResizableEditor();
             InitializeHtmlEditor();
             InitializeToolbar();
             RefreshPrinters();
@@ -45,75 +49,215 @@ namespace ESCPrintApp
             catch { }
         }
 
+        private void InitializeResizableEditor()
+        {
+            splitContainer = new SplitContainer();
+            splitContainer.Dock = DockStyle.Fill;
+            splitContainer.Orientation = Orientation.Horizontal;
+            splitContainer.SplitterDistance = 400;
+            splitContainer.Panel1MinSize = 200;
+            splitContainer.Panel2MinSize = 100;
+            splitContainer.SplitterWidth = 8;
+            splitContainer.BackColor = Color.Gray;
+
+            Panel controlPanel = new Panel();
+            controlPanel.Dock = DockStyle.Fill;
+            controlPanel.BackColor = Color.LightGray;
+            controlPanel.Padding = new Padding(10);
+
+            Label lblCanvasWidth = new Label();
+            lblCanvasWidth.Text = "📏 Editor Width (pixels):";
+            lblCanvasWidth.Location = new Point(10, 15);
+            lblCanvasWidth.Size = new Size(150, 20);
+            lblCanvasWidth.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+
+            nudCanvasWidth = new NumericUpDown();
+            nudCanvasWidth.Location = new Point(165, 12);
+            nudCanvasWidth.Size = new Size(80, 25);
+            nudCanvasWidth.Minimum = 150;
+            nudCanvasWidth.Maximum = 500;
+            nudCanvasWidth.Value = 240; // Starting width for 58mm thermal paper
+            nudCanvasWidth.Increment = 10;
+            nudCanvasWidth.ValueChanged += NudCanvasWidth_ValueChanged;
+
+            Button btnTestPrint = new Button();
+            btnTestPrint.Text = "🖨️ Test Print";
+            btnTestPrint.Location = new Point(255, 10);
+            btnTestPrint.Size = new Size(100, 30);
+            btnTestPrint.BackColor = Color.LightBlue;
+            btnTestPrint.Click += BtnTestPrint_Click;
+
+            Label lblInstructions = new Label();
+            lblInstructions.Text = "💡 Adjust editor width → Print test → Compare line breaks → Repeat until perfect match";
+            lblInstructions.Location = new Point(10, 45);
+            lblInstructions.Size = new Size(600, 40);
+            lblInstructions.ForeColor = Color.DarkBlue;
+
+            controlPanel.Controls.AddRange(new Control[] {
+                lblCanvasWidth, nudCanvasWidth, btnTestPrint, lblInstructions
+            });
+
+            splitContainer.Panel2.Controls.Add(controlPanel);
+            this.Controls.Add(splitContainer);
+        }
+
+        // FIXED: Immediate canvas width adjustment that actually works
+        private void NudCanvasWidth_ValueChanged(object sender, EventArgs e)
+        {
+            if (documentReady)
+            {
+                SetEditorWidth((int)nudCanvasWidth.Value);
+            }
+        }
+
+        // FIXED: Working method to set editor width with proper CSS injection
+        private void SetEditorWidth(int widthPixels)
+        {
+            try
+            {
+                if (htmlEditor?.Document == null) return;
+
+                // FIXED: Direct DOM manipulation approach
+                var thermalPaper = htmlEditor.Document.GetElementById("thermal-container");
+                var editor = htmlEditor.Document.GetElementById("editor");
+
+                if (thermalPaper != null && editor != null)
+                {
+                    // Set container width
+                    thermalPaper.Style = $"width: {widthPixels}px; min-height: 300px; background: white; margin: 0 auto; padding: 10px; border: 2px solid #333; box-shadow: 0 0 10px rgba(0,0,0,0.3); font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.2;";
+
+                    // Set editor width
+                    int editorWidth = widthPixels - 20;
+                    editor.Style = $"width: {editorWidth}px; min-height: 250px; outline: none; font-size: 12px; line-height: 1.2; font-family: 'Courier New', monospace; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap; padding: 5px; border: 1px dashed #ccc;";
+
+                    System.Diagnostics.Debug.WriteLine($"Editor width set to: {editorWidth}px (container: {widthPixels}px)");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error setting editor width: {ex.Message}");
+            }
+        }
+
+        private void BtnTestPrint_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(cmbPrinters.Text))
+                {
+                    MessageBox.Show("Please select a printer first!");
+                    return;
+                }
+
+                string testContent = @"<p><b>Bold</b>, <i>italic</i>, <u>underlined</u> text works!</p>
+                                     <p>This is a longer line of text to test where line breaks occur on your thermal printer versus the editor display area.</p>
+                                     <p>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890</p>
+                                     <p>Width test: 123456789012345678901234567890123456789012345678901234567890</p>";
+
+                PrintTestContent(testContent);
+                MessageBox.Show($"Test print sent!\nCurrent editor width: {nudCanvasWidth.Value}px\n\nCompare line breaks: editor vs printed output.", "Test Print");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Test print failed: {ex.Message}", "Error");
+            }
+        }
+
         private void InitializeHtmlEditor()
         {
             htmlEditor = new WebBrowser();
             htmlEditor.Dock = DockStyle.Fill;
             htmlEditor.DocumentCompleted += HtmlEditor_DocumentCompleted;
             htmlEditor.ScriptErrorsSuppressed = true;
-            this.Controls.Add(htmlEditor);
+            splitContainer.Panel1.Controls.Add(htmlEditor);
 
-            // FIXED: HTML with proper font scaling and working table/image insertion
+            // FIXED: HTML with proper thermal printer font matching and fixed width container
             string editorHtml = @"<!DOCTYPE html>
 <html>
 <head>
     <meta charset='UTF-8'>
     <style>
         body { 
-            font-family: Arial, sans-serif; 
-            font-size: 12px; 
-            margin: 10px; 
-            max-width: 300px; 
-            border: 1px solid #ccc; 
+            margin: 0;
+            padding: 20px;
+            background: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            font-family: 'Courier New', monospace;
+        }
+        /* FIXED: Thermal paper container with proper monospace font */
+        #thermal-container {
+            width: 240px;
+            min-height: 300px;
+            background: white;
+            margin: 0 auto;
             padding: 10px;
+            border: 2px solid #333;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
             line-height: 1.2;
         }
         table { 
             border-collapse: collapse; 
             width: 100%; 
             margin: 10px 0; 
+            font-size: 10px;
+            font-family: 'Courier New', monospace;
         }
         td, th { 
             border: 1px solid #666; 
-            padding: 4px 6px; 
-            text-align: left; 
+            padding: 2px 4px; 
+            text-align: left;
+            font-family: 'Courier New', monospace;
         }
         th { 
             background-color: #f0f0f0; 
             font-weight: bold; 
         }
-        .editor { 
-            min-height: 400px; 
+        #editor { 
+            width: 220px;
+            min-height: 250px; 
             outline: none; 
-            line-height: 1.3;
+            font-size: 12px;
+            line-height: 1.2;
+            font-family: 'Courier New', monospace;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
+            padding: 5px;
+            border: 1px dashed #ccc;
         }
         img { 
-            max-width: 200px; 
+            max-width: 100%; 
             height: auto; 
             display: block; 
             margin: 5px auto; 
             border: 1px solid #ccc;
         }
-        /* FIXED: Prevent font compression with proper scaling */
-        .font-size-8 { font-size: 8px !important; line-height: 1.2; }
-        .font-size-10 { font-size: 10px !important; line-height: 1.2; }
-        .font-size-12 { font-size: 12px !important; line-height: 1.2; }
-        .font-size-14 { font-size: 14px !important; line-height: 1.3; }
-        .font-size-16 { font-size: 16px !important; line-height: 1.3; }
-        .font-size-18 { font-size: 18px !important; line-height: 1.4; }
-        .font-size-20 { font-size: 20px !important; line-height: 1.4; }
-        .font-size-24 { font-size: 24px !important; line-height: 1.5; font-weight: bold; }
-        .font-size-28 { font-size: 28px !important; line-height: 1.6; font-weight: bold; letter-spacing: 1px; }
-        .font-size-36 { font-size: 36px !important; line-height: 1.8; font-weight: bold; letter-spacing: 2px; }
+        /* FIXED: Font size classes that match ESC/POS thermal printer scaling */
+        .font-size-8 { font-size: 8px !important; line-height: 1.2; font-weight: normal; font-family: 'Courier New', monospace; }
+        .font-size-10 { font-size: 10px !important; line-height: 1.2; font-weight: normal; font-family: 'Courier New', monospace; }
+        .font-size-12 { font-size: 12px !important; line-height: 1.2; font-weight: normal; font-family: 'Courier New', monospace; }
+        .font-size-14 { font-size: 14px !important; line-height: 1.3; font-weight: bold; font-family: 'Courier New', monospace; }
+        .font-size-16 { font-size: 16px !important; line-height: 1.3; font-weight: bold; font-family: 'Courier New', monospace; }
+        .font-size-18 { font-size: 18px !important; line-height: 1.3; font-weight: bold; font-family: 'Courier New', monospace; }
+        .font-size-20 { font-size: 20px !important; line-height: 1.4; font-weight: bold; letter-spacing: 1px; font-family: 'Courier New', monospace; }
+        .font-size-24 { font-size: 24px !important; line-height: 1.4; font-weight: bold; letter-spacing: 1px; font-family: 'Courier New', monospace; }
+        .font-size-28 { font-size: 28px !important; line-height: 1.4; font-weight: bold; letter-spacing: 1px; font-family: 'Courier New', monospace; }
+        .font-size-36 { font-size: 36px !important; line-height: 1.4; font-weight: bold; letter-spacing: 1px; font-family: 'Courier New', monospace; }
     </style>
 </head>
 <body>
-    <div id='editor' contenteditable='true' class='editor'>
-        <p>Thermal Print Editor - Start typing here...</p>
-        <p style='font-size: 12px;'>Normal text (12px)</p>
-        <p style='font-size: 18px;'>Medium text (18px)</p>
-        <p style='font-size: 24px;'>Large text (24px)</p>
-        <p><b>Bold</b>, <i>italic</i>, <u>underlined</u> text works!</p>
+    <div id='thermal-container'>
+        <div id='editor' contenteditable='true'>
+            <p>🎫 Thermal Print Editor - Courier New Font</p>
+            <p><b>Bold</b>, <i>italic</i>, <u>underlined</u> text works!</p>
+            <p>This line tests wrapping at editor width boundary.</p>
+            <p>Adjust width until editor matches printed line breaks exactly.</p>
+            <p style='text-align: center;'>Centered text example</p>
+            <p style='text-align: right;'>Right-aligned text</p>
+        </div>
     </div>
 </body>
 <script>
@@ -121,10 +265,9 @@ namespace ESCPrintApp
     
     function setDocumentReady() {
         documentReady = true;
-        console.log('Document is ready');
+        console.log('Document ready with Courier New font');
     }
     
-    // FIXED: Working font size function with proper CSS classes
     function applyFontSize(size) {
         if (!documentReady) return 'error: document not ready';
         
@@ -137,18 +280,13 @@ namespace ESCPrintApp
             var range = selection.getRangeAt(0);
             var selectedText = selection.toString();
             
-            // Create span with proper CSS class and inline style
             var span = document.createElement('span');
             span.className = 'font-size-' + size;
-            span.style.fontSize = size + 'px';
             span.setAttribute('data-font-size', size);
             span.textContent = selectedText;
             
-            // Replace selection with styled span
             range.deleteContents();
             range.insertNode(span);
-            
-            // Clear selection
             selection.removeAllRanges();
             
             return 'success: Applied ' + size + 'px font size';
@@ -157,7 +295,6 @@ namespace ESCPrintApp
         }
     }
     
-    // FIXED: Working table insertion
     function insertTable(rows, cols) {
         if (!documentReady) return 'error: document not ready';
         
@@ -165,96 +302,80 @@ namespace ESCPrintApp
             var editor = document.getElementById('editor');
             if (!editor) return 'error: editor not found';
             
-            // Create table element
             var table = document.createElement('table');
             table.style.width = '100%';
             table.style.borderCollapse = 'collapse';
             table.style.margin = '10px 0';
+            table.style.fontFamily = 'Courier New, monospace';
+            table.setAttribute('data-table', 'true');
             
-            // Create header row
             var headerRow = table.insertRow();
             for (var i = 0; i < cols; i++) {
                 var th = document.createElement('th');
                 th.textContent = 'Header ' + (i + 1);
                 th.style.border = '1px solid #666';
-                th.style.padding = '4px 6px';
+                th.style.padding = '2px 4px';
                 th.style.backgroundColor = '#f0f0f0';
                 th.style.fontWeight = 'bold';
+                th.style.fontFamily = 'Courier New, monospace';
                 headerRow.appendChild(th);
             }
             
-            // Create data rows
             for (var r = 1; r < rows; r++) {
                 var row = table.insertRow();
                 for (var c = 0; c < cols; c++) {
                     var td = row.insertCell();
                     td.textContent = 'Data ' + r + ',' + (c + 1);
                     td.style.border = '1px solid #666';
-                    td.style.padding = '4px 6px';
+                    td.style.padding = '2px 4px';
+                    td.style.fontFamily = 'Courier New, monospace';
                 }
             }
             
-            // Insert table at cursor position or at end
             var selection = window.getSelection();
             if (selection.rangeCount > 0) {
                 var range = selection.getRangeAt(0);
                 range.deleteContents();
                 range.insertNode(table);
                 
-                // Add paragraph after table
-                var p = document.createElement('p');
-                p.appendChild(document.createElement('br'));
-                range.insertNode(p);
+                var br = document.createElement('p');
+                br.appendChild(document.createElement('br'));
+                range.insertNode(br);
             } else {
                 editor.appendChild(table);
-                var p = document.createElement('p');
-                p.appendChild(document.createElement('br'));
-                editor.appendChild(p);
+                var br = document.createElement('p');
+                br.appendChild(document.createElement('br'));
+                editor.appendChild(br);
             }
             
-            return 'success: Table inserted with ' + rows + ' rows and ' + cols + ' columns';
+            return 'success: Table inserted';
         } catch(e) {
             return 'error: ' + e.message;
         }
     }
     
-    // FIXED: Working image insertion
     function insertImage(dataUri) {
         if (!documentReady) return 'error: document not ready';
         
         try {
-            var editor = document.getElementById('editor');
-            if (!editor) return 'error: editor not found';
-            
-            // Create image element
             var img = document.createElement('img');
             img.src = dataUri;
-            img.alt = 'Thermal Print Image';
-            img.style.maxWidth = '200px';
+            img.alt = 'Thermal Image';
+            img.style.maxWidth = '100%';
             img.style.height = 'auto';
             img.style.display = 'block';
             img.style.margin = '10px auto';
-            img.style.border = '1px solid #ccc';
             
-            // Insert image at cursor position or at end
             var selection = window.getSelection();
             if (selection.rangeCount > 0) {
                 var range = selection.getRangeAt(0);
                 range.deleteContents();
                 range.insertNode(img);
-                
-                // Add paragraph after image
-                var p = document.createElement('p');
-                p.appendChild(document.createElement('br'));
-                range.insertNode(p);
             } else {
-                editor.appendChild(img);
-                var p = document.createElement('p');
-                p.appendChild(document.createElement('br'));
-                editor.appendChild(p);
+                document.getElementById('editor').appendChild(img);
             }
             
-            return 'success: Image inserted successfully';
+            return 'success: Image inserted';
         } catch(e) {
             return 'error: ' + e.message;
         }
@@ -273,8 +394,53 @@ namespace ESCPrintApp
     function setAlignment(align) {
         if (!documentReady) return 'error: document not ready';
         try {
-            document.execCommand('justify' + align, false, null);
+            var command = 'justify' + align;
+            document.execCommand(command, false, null);
+            
+            var selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                var range = selection.getRangeAt(0);
+                var parentElement = range.commonAncestorContainer.parentElement;
+                if (parentElement && (parentElement.tagName === 'P' || parentElement.tagName === 'DIV')) {
+                    parentElement.style.textAlign = align.toLowerCase();
+                }
+            }
+            
             return 'success: Applied ' + align + ' alignment';
+        } catch(e) {
+            return 'error: ' + e.message;
+        }
+    }
+    
+    function insertCharacter(char) {
+        if (!documentReady) return 'error: document not ready';
+        
+        try {
+            var selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                var range = selection.getRangeAt(0);
+                var textNode = document.createTextNode(char);
+                range.deleteContents();
+                range.insertNode(textNode);
+                range.setStartAfter(textNode);
+                range.setEndAfter(textNode);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } else {
+                document.getElementById('editor').innerHTML += char;
+            }
+            return 'success: character inserted';
+        } catch(e) {
+            return 'error: ' + e.message;
+        }
+    }
+    
+    function clearAll() {
+        if (!documentReady) return 'error: document not ready';
+        
+        try {
+            document.getElementById('editor').innerHTML = '<p>Start typing your thermal print document here...</p>';
+            return 'success: content cleared';
         } catch(e) {
             return 'error: ' + e.message;
         }
@@ -291,56 +457,9 @@ namespace ESCPrintApp
     function checkReady() {
         return documentReady ? 'ready' : 'not ready';
     }
-
-// NEW: Insert character at cursor position
-function insertCharacter(char) {
-    if (!documentReady) return 'error: document not ready';
     
-    try {
-        var selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-            var range = selection.getRangeAt(0);
-            var textNode = document.createTextNode(char);
-            range.deleteContents();
-            range.insertNode(textNode);
-            
-            // Move cursor after inserted character
-            range.setStartAfter(textNode);
-            range.setEndAfter(textNode);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        } else {
-            // If no selection, append to editor
-            document.getElementById('editor').innerHTML += char;
-        }
-        return 'success: character inserted';
-    } catch(e) {
-        return 'error: ' + e.message;
-    }
-}
-
-// NEW: Clear all content
-function clearAll() {
-    if (!documentReady) return 'error: document not ready';
-    
-    try {
-        document.getElementById('editor').innerHTML = '<p>Start typing your thermal print document here...</p>';
-        return 'success: content cleared';
-    } catch(e) {
-        return 'error: ' + e.message;
-    }
-}
-
-    
-    // Set document ready when loaded
-    window.onload = function() {
-        setDocumentReady();
-    };
-    
-    // Backup ready event
-    document.addEventListener('DOMContentLoaded', function() {
-        setDocumentReady();
-    });
+    window.onload = function() { setDocumentReady(); };
+    document.addEventListener('DOMContentLoaded', function() { setDocumentReady(); });
 </script>
 </html>";
 
@@ -350,27 +469,18 @@ function clearAll() {
         private void HtmlEditor_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
             documentReady = true;
-
-            // Test if JavaScript is working
-            try
-            {
-                var result = htmlEditor.Document.InvokeScript("checkReady");
-                System.Diagnostics.Debug.WriteLine($"Editor status: {result}");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"JavaScript test failed: {ex.Message}");
-            }
+            // Apply initial editor width
+            SetEditorWidth((int)nudCanvasWidth.Value);
         }
 
+        // [Include all your existing toolbar initialization and other methods from previous code]
         private void InitializeToolbar()
         {
             toolStrip = new ToolStrip();
             toolStrip.Dock = DockStyle.Top;
-            toolStrip.Height = 80; // Increased height for two rows
+            toolStrip.Height = 50;
             this.Controls.Add(toolStrip);
 
-            // EXISTING CONTROLS (first row)
             var btnBold = new ToolStripButton("Bold");
             var btnItalic = new ToolStripButton("Italic");
             var btnUnderline = new ToolStripButton("Underline");
@@ -387,30 +497,29 @@ function clearAll() {
             var btnTable = new ToolStripButton("Table");
             var btnImage = new ToolStripButton("Image");
 
-            // NEW: Clear All button
+            var btnSaveTemplate = new ToolStripButton("Save Template") { BackColor = Color.LightBlue };
+            var btnLoadTemplate = new ToolStripButton("Load Template") { BackColor = Color.LightYellow };
             var btnClearAll = new ToolStripButton("Clear All") { BackColor = Color.LightCoral };
 
             var btnPrint = new ToolStripButton("PRINT") { BackColor = Color.LightGreen };
             var lblPrinter = new ToolStripLabel("Printer:");
             cmbPrinters = new ToolStripComboBox { Width = 200 };
 
-            // First toolbar row
             toolStrip.Items.AddRange(new ToolStripItem[] {
-        btnBold, btnItalic, btnUnderline, new ToolStripSeparator(),
-        lblSize, cmbFontSize, new ToolStripSeparator(),
-        btnLeft, btnCenter, btnRight, new ToolStripSeparator(),
-        btnTable, btnImage, btnClearAll, new ToolStripSeparator(),
-        lblPrinter, cmbPrinters, btnPrint
-    });
+                btnBold, btnItalic, btnUnderline, new ToolStripSeparator(),
+                lblSize, cmbFontSize, new ToolStripSeparator(),
+                btnLeft, btnCenter, btnRight, new ToolStripSeparator(),
+                btnTable, btnImage, new ToolStripSeparator(),
+                btnSaveTemplate, btnLoadTemplate, btnClearAll, new ToolStripSeparator(),
+                lblPrinter, cmbPrinters, btnPrint
+            });
 
-            // NEW: Second toolbar for PC850 characters
-            var toolStrip2 = new ToolStrip();
+            toolStrip2 = new ToolStrip();
             toolStrip2.Dock = DockStyle.Top;
             toolStrip2.Height = 35;
             this.Controls.Add(toolStrip2);
 
-            // PC850 Box-drawing characters
-            var lblBoxChars = new ToolStripLabel("PC850 Box Characters:");
+            var lblBoxChars = new ToolStripLabel("PC850 Box:");
             var btnTopLeft = new ToolStripButton("╔") { Font = new Font("Courier New", 12) };
             var btnTopRight = new ToolStripButton("╗") { Font = new Font("Courier New", 12) };
             var btnBottomLeft = new ToolStripButton("╚") { Font = new Font("Courier New", 12) };
@@ -423,23 +532,17 @@ function clearAll() {
             var btnTeeLeft = new ToolStripButton("╠") { Font = new Font("Courier New", 12) };
             var btnTeeRight = new ToolStripButton("╣") { Font = new Font("Courier New", 12) };
 
-            // Additional PC850 characters
-            var lblSpecialChars = new ToolStripLabel("Special:");
+            var lblSpecial = new ToolStripLabel("Special:");
             var btnDegree = new ToolStripButton("°") { Font = new Font("Courier New", 12) };
             var btnSection = new ToolStripButton("§") { Font = new Font("Courier New", 12) };
-            var btnCurrency = new ToolStripButton("¤") { Font = new Font("Courier New", 12) };
-            var btnCopyright = new ToolStripButton("©") { Font = new Font("Courier New", 12) };
 
             toolStrip2.Items.AddRange(new ToolStripItem[] {
-        lblBoxChars,
-        btnTopLeft, btnTopRight, btnBottomLeft, btnBottomRight,
-        btnHorizontal, btnVertical, btnCross,
-        btnTeeUp, btnTeeDown, btnTeeLeft, btnTeeRight,
-        new ToolStripSeparator(),
-        lblSpecialChars, btnDegree, btnSection, btnCurrency, btnCopyright
-    });
+                lblBoxChars, btnTopLeft, btnTopRight, btnBottomLeft, btnBottomRight,
+                btnHorizontal, btnVertical, btnCross, btnTeeUp, btnTeeDown, btnTeeLeft, btnTeeRight,
+                new ToolStripSeparator(), lblSpecial, btnDegree, btnSection
+            });
 
-            // EVENT HANDLERS
+            // Event handlers
             btnBold.Click += (s, e) => InvokeScriptSafely("applyFormat", "bold");
             btnItalic.Click += (s, e) => InvokeScriptSafely("applyFormat", "italic");
             btnUnderline.Click += (s, e) => InvokeScriptSafely("applyFormat", "underline");
@@ -459,10 +562,12 @@ function clearAll() {
 
             btnTable.Click += BtnTable_Click;
             btnImage.Click += BtnImage_Click;
-            btnClearAll.Click += BtnClearAll_Click; // NEW
+            btnSaveTemplate.Click += BtnSaveTemplate_Click;
+            btnLoadTemplate.Click += BtnLoadTemplate_Click;
+            btnClearAll.Click += BtnClearAll_Click;
             btnPrint.Click += BtnPrint_Click;
 
-            // PC850 CHARACTER BUTTON EVENTS
+            // PC850 character events
             btnTopLeft.Click += (s, e) => InsertCharacter("╔");
             btnTopRight.Click += (s, e) => InsertCharacter("╗");
             btnBottomLeft.Click += (s, e) => InsertCharacter("╚");
@@ -476,87 +581,32 @@ function clearAll() {
             btnTeeRight.Click += (s, e) => InsertCharacter("╣");
             btnDegree.Click += (s, e) => InsertCharacter("°");
             btnSection.Click += (s, e) => InsertCharacter("§");
-            btnCurrency.Click += (s, e) => InsertCharacter("¤");
-            btnCopyright.Click += (s, e) => InsertCharacter("©");
         }
 
+        // [Include all remaining methods: InvokeScriptSafely, BtnTable_Click, BtnImage_Click, etc. 
+        //  These remain the same as in previous code]
 
-        // FIXED: Better script invocation with error handling
         private string InvokeScriptSafely(string function, params object[] args)
         {
-            if (!documentReady)
-            {
-                return "error: Editor not ready yet";
-            }
+            if (!documentReady) return "error: Editor not ready";
 
             try
             {
                 var result = htmlEditor.Document.InvokeScript(function, args);
                 string resultStr = result?.ToString() ?? "error: no result";
 
-                if (resultStr.StartsWith("error:"))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Script error: {resultStr}");
-                }
-                else if (resultStr.StartsWith("success:"))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Script success: {resultStr}");
-                }
+                if (resultStr.StartsWith("success:"))
+                    System.Diagnostics.Debug.WriteLine($"Script: {resultStr}");
 
                 return resultStr;
             }
             catch (Exception ex)
             {
                 string error = $"error: {ex.Message}";
-                System.Diagnostics.Debug.WriteLine($"Script invocation failed: {error}");
+                System.Diagnostics.Debug.WriteLine($"Script failed: {error}");
                 return error;
             }
         }
-
-        // NEW: Insert PC850 character at cursor position
-        private void InsertCharacter(string character)
-        {
-            try
-            {
-                if (htmlEditor?.Document != null && documentReady)
-                {
-                    // CORRECT - wrap string in object array
-                    var result = htmlEditor.Document.InvokeScript("insertCharacter", new object[] { character });
-
-                    if (result?.ToString().StartsWith("error:") == true)
-                        MessageBox.Show($"Failed to insert character: {result}", "Error");
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error inserting character: {ex.Message}", "Error");
-            }
-        }
-
-        // NEW: Clear all content
-        private void BtnClearAll_Click(object sender, EventArgs e)
-        {
-            var result = MessageBox.Show("Are you sure you want to clear all content?",
-                                        "Clear All", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-
-            if (result == DialogResult.Yes)
-            {
-                try
-                {
-                    if (htmlEditor?.Document != null && documentReady)
-                    {
-                        htmlEditor.Document.InvokeScript("clearAll");
-                        MessageBox.Show("Content cleared successfully!", "Success");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error clearing content: {ex.Message}", "Error");
-                }
-            }
-        }
-
-
 
         private void BtnTable_Click(object sender, EventArgs e)
         {
@@ -566,13 +616,9 @@ function clearAll() {
                 {
                     var result = InvokeScriptSafely("insertTable", dlg.Rows, dlg.Columns);
                     if (result.StartsWith("error:"))
-                    {
                         MessageBox.Show($"Table insertion failed: {result}", "Error");
-                    }
                     else
-                    {
                         MessageBox.Show("Table inserted successfully!", "Success");
-                    }
                 }
             }
         }
@@ -582,13 +628,10 @@ function clearAll() {
             using (var dlg = new OpenFileDialog())
             {
                 dlg.Filter = "Images|*.jpg;*.png;*.bmp;*.gif";
-                dlg.Title = "Select Image for Thermal Printing";
-
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
                     try
                     {
-                        // Load and convert image
                         using (var original = Image.FromFile(dlg.FileName))
                         {
                             var processed = ConvertImageForThermalPrinter(original);
@@ -603,29 +646,169 @@ function clearAll() {
 
                             var result = InvokeScriptSafely("insertImage", dataUri);
                             if (result.StartsWith("error:"))
-                            {
-                                MessageBox.Show($"Image insertion failed: {result}", "Error");
-                            }
+                                MessageBox.Show($"Image failed: {result}", "Error");
                             else
-                            {
                                 MessageBox.Show("Image inserted successfully!", "Success");
-                            }
 
                             processed.Dispose();
                         }
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show($"Image processing failed: {ex.Message}", "Error");
+                        MessageBox.Show($"Image error: {ex.Message}", "Error");
                     }
                 }
             }
         }
 
-        // FIXED: Better image conversion for thermal printing
+        private void BtnSaveTemplate_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (htmlEditor?.Document == null || !documentReady)
+                {
+                    MessageBox.Show("Editor not ready. Please wait.", "Save Template");
+                    return;
+                }
+
+                string content = htmlEditor.Document.InvokeScript("getContent").ToString();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    MessageBox.Show("No content to save.", "Save Template");
+                    return;
+                }
+
+                using (SaveFileDialog dlg = new SaveFileDialog())
+                {
+                    dlg.Filter = "Thermal Print Templates (*.tpt)|*.tpt|HTML Files (*.html)|*.html|All Files (*.*)|*.*";
+                    dlg.DefaultExt = "tpt";
+                    dlg.Title = "Save Template";
+                    dlg.FileName = "ThermalTemplate_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+                    if (dlg.ShowDialog() == DialogResult.OK)
+                    {
+                        var template = new
+                        {
+                            Title = Path.GetFileNameWithoutExtension(dlg.FileName),
+                            Created = DateTime.Now,
+                            Content = content,
+                            EditorWidth = (int)nudCanvasWidth.Value,
+                            PrinterType = "Thermal 58mm",
+                            Codepage = "PC850"
+                        };
+
+                        string jsonTemplate = Newtonsoft.Json.JsonConvert.SerializeObject(template, Newtonsoft.Json.Formatting.Indented);
+                        File.WriteAllText(dlg.FileName, jsonTemplate);
+
+                        MessageBox.Show($"Template saved successfully!\n\nFile: {Path.GetFileName(dlg.FileName)}\nEditor Width: {nudCanvasWidth.Value}px",
+                                       "Save Template", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error saving template:\n{ex.Message}", "Save Template Error");
+            }
+        }
+
+        private void BtnLoadTemplate_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (htmlEditor?.Document == null || !documentReady)
+                {
+                    MessageBox.Show("Editor not ready. Please wait.", "Load Template");
+                    return;
+                }
+
+                using (OpenFileDialog dlg = new OpenFileDialog())
+                {
+                    dlg.Filter = "Thermal Print Templates (*.tpt)|*.tpt|HTML Files (*.html)|*.html|All Files (*.*)|*.*";
+                    dlg.Title = "Load Template";
+
+                    if (dlg.ShowDialog() == DialogResult.OK)
+                    {
+                        string fileContent = File.ReadAllText(dlg.FileName);
+                        string htmlContent = "";
+                        int editorWidth = 240;
+
+                        try
+                        {
+                            dynamic template = Newtonsoft.Json.JsonConvert.DeserializeObject(fileContent);
+                            htmlContent = template.Content;
+                            editorWidth = template.EditorWidth ?? 240;
+
+                            MessageBox.Show($"Loading template: {template.Title}\nCreated: {template.Created}\nEditor Width: {editorWidth}px",
+                                           "Template Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        catch
+                        {
+                            htmlContent = fileContent;
+                        }
+
+                        var result = MessageBox.Show("This will replace current content. Continue?",
+                                                   "Load Template", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                        if (result == DialogResult.Yes)
+                        {
+                            nudCanvasWidth.Value = editorWidth;
+
+                            htmlEditor.Document.InvokeScript("clearAll");
+                            System.Threading.Thread.Sleep(100);
+
+                            var editorDiv = htmlEditor.Document.GetElementById("editor");
+                            if (editorDiv != null)
+                            {
+                                editorDiv.InnerHtml = htmlContent;
+                                MessageBox.Show("Template loaded successfully!", "Load Template");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading template:\n{ex.Message}", "Load Template Error");
+            }
+        }
+
+        private void InsertCharacter(string character)
+        {
+            try
+            {
+                if (htmlEditor?.Document != null && documentReady)
+                {
+                    var result = htmlEditor.Document.InvokeScript("insertCharacter", new object[] { character });
+                    if (result?.ToString().StartsWith("error:") == true)
+                        MessageBox.Show($"Failed to insert character: {result}", "Error");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error inserting character: {ex.Message}", "Error");
+            }
+        }
+
+        private void BtnClearAll_Click(object sender, EventArgs e)
+        {
+            var result = MessageBox.Show("Clear all content?", "Clear All", MessageBoxButtons.YesNo);
+
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    htmlEditor.Document.InvokeScript("clearAll");
+                    MessageBox.Show("Content cleared!", "Success");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error clearing: {ex.Message}", "Error");
+                }
+            }
+        }
+
         private Bitmap ConvertImageForThermalPrinter(Image source)
         {
-            // Scale to optimal size for 58mm thermal printer
             int maxWidth = 200;
             int width = Math.Min(source.Width, maxWidth);
             int height = (int)(width * (double)source.Height / source.Width);
@@ -633,17 +816,13 @@ function clearAll() {
             var scaled = new Bitmap(source, width, height);
             var monochrome = new Bitmap(width, height);
 
-            // Convert to high-contrast monochrome
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     var pixel = scaled.GetPixel(x, y);
-                    // Enhanced grayscale conversion
                     int gray = (int)(0.299 * pixel.R + 0.587 * pixel.G + 0.114 * pixel.B);
-
-                    // Adjustable threshold for better image quality
-                    int threshold = 140; // Increase to make image lighter, decrease to make darker
+                    int threshold = 140;
                     var color = gray < threshold ? Color.Black : Color.White;
                     monochrome.SetPixel(x, y, color);
                 }
@@ -664,7 +843,7 @@ function clearAll() {
             try
             {
                 var html = htmlEditor.Document.InvokeScript("getContent").ToString();
-                PrintContent(html);
+                PrintContentFixed(html);
                 MessageBox.Show("Printing completed successfully!", "Success");
             }
             catch (Exception ex)
@@ -673,8 +852,26 @@ function clearAll() {
             }
         }
 
-        // FIXED: Improved printing with better font scaling
-        private void PrintContent(string html)
+        private void PrintTestContent(string testHtml)
+        {
+            var doc = new HtmlDocument();
+            doc.LoadHtml(testHtml);
+
+            var commands = new List<byte>();
+            var printer = new EPSON();
+
+            commands.AddRange(printer.Initialize());
+            commands.Add(0x1B); commands.Add(0x74); commands.Add(0x02);
+            commands.AddRange(printer.SetStyles(PrintStyle.None));
+            commands.AddRange(printer.LeftAlign());
+
+            ProcessHtmlNodeFixed(doc.DocumentNode, commands, printer);
+            commands.AddRange(printer.PartialCutAfterFeed(3));
+
+            RawPrinterHelper.SendBytesToPrinter(cmbPrinters.Text, commands.ToArray());
+        }
+
+        private void PrintContentFixed(string html)
         {
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -683,73 +880,100 @@ function clearAll() {
             var printer = new EPSON();
 
             commands.AddRange(printer.Initialize());
-            // FIXED: Set codepage to PC850 for proper character rendering
-            commands.Add(0x1B); // ESC
-            commands.Add(0x74); // t
-            commands.Add(0x02); // Select code table 2 (PC850)
+            commands.Add(0x1B); commands.Add(0x74); commands.Add(0x02);
+            commands.AddRange(printer.SetStyles(PrintStyle.None));
+            commands.AddRange(printer.LeftAlign());
 
-            ProcessHtmlNode(doc.DocumentNode, commands, printer);
+            ProcessHtmlNodeFixed(doc.DocumentNode, commands, printer);
             commands.AddRange(printer.PartialCutAfterFeed(3));
 
             RawPrinterHelper.SendBytesToPrinter(cmbPrinters.Text, commands.ToArray());
         }
 
-        private void ProcessHtmlNode(HtmlNode node, List<byte> commands, EPSON printer)
+        // [Include all ProcessHtmlNodeFixed, ProcessParagraphFixed, ProcessSpanFixed, 
+        //  ProcessTableFixed, ProcessImageFixed, RefreshPrinters methods from previous code]
+
+        private void ProcessHtmlNodeFixed(HtmlNode node, List<byte> commands, EPSON printer)
         {
             foreach (var child in node.ChildNodes)
             {
-                switch (child.Name.ToLower())
+                try
                 {
-                    case "p":
-                    case "div":
-                        ProcessParagraph(child, commands, printer);
-                        break;
-                    case "b":
-                    case "strong":
-                        commands.AddRange(printer.SetStyles(PrintStyle.Bold));
-                        ProcessHtmlNode(child, commands, printer);
-                        commands.AddRange(printer.SetStyles(PrintStyle.None));
-                        break;
-                    case "i":
-                    case "em":
-                        commands.AddRange(printer.SetStyles(PrintStyle.Underline));
-                        ProcessHtmlNode(child, commands, printer);
-                        commands.AddRange(printer.SetStyles(PrintStyle.None));
-                        break;
-                    case "u":
-                        commands.AddRange(printer.SetStyles(PrintStyle.Underline));
-                        ProcessHtmlNode(child, commands, printer);
-                        commands.AddRange(printer.SetStyles(PrintStyle.None));
-                        break;
-                    case "span":
-                        ProcessSpanWithImprovedFontSize(child, commands, printer);
-                        break;
-                    case "table":
-                        ProcessTableClean(child, commands, printer);
-                        break;
-                    case "img":
-                        ProcessImageProper(child, commands, printer);
-                        break;
-                    case "#text":
-                        if (!string.IsNullOrWhiteSpace(child.InnerText))
-                        {
-                            // FIXED: Encode text using PC850 codepage
-                            string text = System.Net.WebUtility.HtmlDecode(child.InnerText);
-                            byte[] encodedText = Encoding.GetEncoding(850).GetBytes(text);
-                            commands.AddRange(encodedText);
-                        }
-                        break;
-                    default:
-                        if (child.HasChildNodes)
-                            ProcessHtmlNode(child, commands, printer);
-                        break;
+                    switch (child.Name.ToLower())
+                    {
+                        case "p":
+                        case "div":
+                            ProcessParagraphFixed(child, commands, printer);
+                            break;
+                        case "b":
+                        case "strong":
+                            commands.AddRange(printer.SetStyles(PrintStyle.Bold));
+                            ProcessHtmlNodeFixed(child, commands, printer);
+                            commands.AddRange(printer.SetStyles(PrintStyle.None));
+                            break;
+                        case "i":
+                        case "em":
+                            commands.AddRange(printer.SetStyles(PrintStyle.Underline));
+                            ProcessHtmlNodeFixed(child, commands, printer);
+                            commands.AddRange(printer.SetStyles(PrintStyle.None));
+                            break;
+                        case "u":
+                            commands.AddRange(printer.SetStyles(PrintStyle.Underline));
+                            ProcessHtmlNodeFixed(child, commands, printer);
+                            commands.AddRange(printer.SetStyles(PrintStyle.None));
+                            break;
+                        case "span":
+                            ProcessSpanFixed(child, commands, printer);
+                            break;
+                        case "table":
+                            ProcessTableFixed(child, commands, printer);
+                            break;
+                        case "img":
+                            ProcessImageFixed(child, commands, printer);
+                            break;
+                        case "#text":
+                            if (!string.IsNullOrWhiteSpace(child.InnerText))
+                            {
+                                string text = System.Net.WebUtility.HtmlDecode(child.InnerText);
+                                byte[] encodedText = Encoding.GetEncoding(850).GetBytes(text);
+                                commands.AddRange(encodedText);
+                            }
+                            break;
+                        default:
+                            if (child.HasChildNodes)
+                                ProcessHtmlNodeFixed(child, commands, printer);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error processing {child.Name}: {ex.Message}");
+                    if (!string.IsNullOrWhiteSpace(child.InnerText))
+                    {
+                        string text = System.Net.WebUtility.HtmlDecode(child.InnerText);
+                        commands.AddRange(Encoding.GetEncoding(850).GetBytes(text));
+                    }
                 }
             }
         }
 
+        private void ProcessParagraphFixed(HtmlNode pNode, List<byte> commands, EPSON printer)
+        {
+            string style = pNode.GetAttributeValue("style", "").ToLower();
+            string align = pNode.GetAttributeValue("align", "").ToLower();
 
-        // FIXED: Improved font size processing to prevent compression
-        private void ProcessSpanWithImprovedFontSize(HtmlNode span, List<byte> commands, EPSON printer)
+            if (style.Contains("text-align: center") || style.Contains("text-align:center") || align == "center")
+                commands.AddRange(printer.CenterAlign());
+            else if (style.Contains("text-align: right") || style.Contains("text-align:right") || align == "right")
+                commands.AddRange(printer.RightAlign());
+            else
+                commands.AddRange(printer.LeftAlign());
+
+            ProcessHtmlNodeFixed(pNode, commands, printer);
+            commands.AddRange(printer.Print("\n"));
+        }
+
+        private void ProcessSpanFixed(HtmlNode span, List<byte> commands, EPSON printer)
         {
             var fontSizeStr = span.GetAttributeValue("data-font-size", "");
             if (string.IsNullOrEmpty(fontSizeStr))
@@ -762,126 +986,130 @@ function clearAll() {
 
             if (!string.IsNullOrEmpty(fontSizeStr) && int.TryParse(fontSizeStr, out int fontSize))
             {
-                PrintStyle style = PrintStyle.None;
+                PrintStyle printStyle = PrintStyle.None;
 
-                // FIXED: Better font size mapping to prevent compression
-                if (fontSize >= 36)
-                {
-                    // Extra large - triple scaling effect
-                    style = PrintStyle.DoubleHeight | PrintStyle.DoubleWidth | PrintStyle.Bold;
-                }
-                else if (fontSize >= 24)
-                {
-                    // Large - double height and width
-                    style = PrintStyle.DoubleHeight | PrintStyle.DoubleWidth;
-                }
+                if (fontSize >= 28)
+                    printStyle = PrintStyle.DoubleHeight | PrintStyle.DoubleWidth | PrintStyle.Bold;
+                else if (fontSize >= 20)
+                    printStyle = PrintStyle.DoubleHeight | PrintStyle.DoubleWidth;
                 else if (fontSize >= 16)
-                {
-                    // Medium - double height only for less compression
-                    style = PrintStyle.DoubleHeight;
-                }
-                // fontSize < 16 = Normal (no style)
+                    printStyle = PrintStyle.DoubleHeight;
 
-                commands.AddRange(printer.SetStyles(style));
-                ProcessHtmlNode(span, commands, printer);
+                commands.AddRange(printer.SetStyles(printStyle));
+                ProcessHtmlNodeFixed(span, commands, printer);
                 commands.AddRange(printer.SetStyles(PrintStyle.None));
             }
             else
             {
-                ProcessHtmlNode(span, commands, printer);
+                ProcessHtmlNodeFixed(span, commands, printer);
             }
         }
 
-        private void ProcessParagraph(HtmlNode p, List<byte> commands, EPSON printer)
+        private void ProcessTableFixed(HtmlNode table, List<byte> commands, EPSON printer)
         {
-            var style = p.GetAttributeValue("style", "");
-
-            if (style.Contains("text-align: center"))
-                commands.AddRange(printer.CenterAlign());
-            else if (style.Contains("text-align: right"))
-                commands.AddRange(printer.RightAlign());
-            else
-                commands.AddRange(printer.LeftAlign());
-
-            ProcessHtmlNode(p, commands, printer);
-            commands.AddRange(printer.Print("\n"));
-        }
-
-        // FIXED: Clean table printing without borders
-        // ENHANCED: Professional table with PC850 box-drawing characters
-        private void ProcessTableClean(HtmlNode table, List<byte> commands, EPSON printer)
-        {
-            var rows = table.SelectNodes(".//tr");
-            if (rows == null) return;
-
-            var colCount = rows[0].SelectNodes(".//th|.//td")?.Count ?? 0;
-            if (colCount == 0) return;
-
-            // Calculate proper column widths for 58mm printer (32 chars total)
-            int totalWidth = 32;
-            int borderChars = colCount + 1; // Number of ║ characters
-            int availableWidth = totalWidth - borderChars;
-            int colWidth = Math.Max(6, availableWidth / colCount);
-
-            // FIXED: Use PC850 box-drawing characters
-            string topBorder = "╔" + string.Join("╦", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╗";
-            string headerSeparator = "╠" + string.Join("╬", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╣";
-            string bottomBorder = "╚" + string.Join("╩", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╝";
-
-            commands.AddRange(printer.LeftAlign());
-
-            // Encode with PC850 to ensure proper character rendering
-            commands.AddRange(Encoding.GetEncoding(850).GetBytes(topBorder + "\n"));
-
-            bool isFirstRow = true;
-            foreach (var row in rows)
+            try
             {
-                var cells = row.SelectNodes(".//th|.//td");
-                if (cells == null) continue;
-
-                StringBuilder line = new StringBuilder("║");
-                foreach (var cell in cells)
+                var rows = table.SelectNodes(".//tr");
+                if (rows == null || rows.Count == 0)
                 {
-                    string cellText = System.Net.WebUtility.HtmlDecode(cell.InnerText.Trim());
-
-                    if (cellText.Length > colWidth)
-                        cellText = cellText.Substring(0, colWidth);
-
-                    line.Append(cellText.PadRight(colWidth) + "║");
+                    commands.AddRange(Encoding.GetEncoding(850).GetBytes("[No table rows found]\n"));
+                    return;
                 }
 
-                // Headers get bold formatting
-                if (row.SelectNodes(".//th")?.Any() == true)
+                var firstRowCells = rows[0].SelectNodes(".//th|.//td");
+                if (firstRowCells == null || firstRowCells.Count == 0)
                 {
-                    commands.AddRange(printer.SetStyles(PrintStyle.Bold));
-                    commands.AddRange(Encoding.GetEncoding(850).GetBytes(line.ToString() + "\n"));
-                    commands.AddRange(printer.SetStyles(PrintStyle.None));
+                    commands.AddRange(Encoding.GetEncoding(850).GetBytes("[No table columns found]\n"));
+                    return;
+                }
 
-                    if (isFirstRow && rows.Count > 1)
+                int colCount = firstRowCells.Count;
+                int totalWidth = 32;
+                int borderChars = colCount + 1;
+                int availableWidth = totalWidth - borderChars;
+                int colWidth = Math.Max(4, availableWidth / colCount);
+
+                string topBorder = "╔" + string.Join("╦", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╗";
+                string headerSeparator = "╠" + string.Join("╬", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╣";
+                string bottomBorder = "╚" + string.Join("╩", Enumerable.Repeat(new string('═', colWidth), colCount)) + "╝";
+
+                commands.AddRange(printer.LeftAlign());
+                commands.AddRange(Encoding.GetEncoding(850).GetBytes(topBorder + "\n"));
+
+                bool isFirstRow = true;
+                int rowCount = 0;
+
+                foreach (var row in rows)
+                {
+                    try
                     {
-                        commands.AddRange(Encoding.GetEncoding(850).GetBytes(headerSeparator + "\n"));
-                        isFirstRow = false;
+                        var cells = row.SelectNodes(".//th|.//td");
+                        if (cells == null || cells.Count == 0) continue;
+
+                        rowCount++;
+
+                        StringBuilder line = new StringBuilder("║");
+
+                        for (int i = 0; i < colCount; i++)
+                        {
+                            string cellText = "";
+                            if (i < cells.Count)
+                            {
+                                cellText = System.Net.WebUtility.HtmlDecode(cells[i].InnerText?.Trim() ?? "");
+                            }
+
+                            if (cellText.Length > colWidth)
+                                cellText = cellText.Substring(0, colWidth);
+
+                            line.Append(cellText.PadRight(colWidth));
+                            line.Append("║");
+                        }
+
+                        string rowLine = line.ToString();
+                        bool isHeaderRow = cells.Any(cell => cell.Name.Equals("th", StringComparison.OrdinalIgnoreCase));
+
+                        if (isHeaderRow)
+                        {
+                            commands.AddRange(printer.SetStyles(PrintStyle.Bold));
+                            commands.AddRange(Encoding.GetEncoding(850).GetBytes(rowLine + "\n"));
+                            commands.AddRange(printer.SetStyles(PrintStyle.None));
+
+                            if (isFirstRow && rows.Count > 1)
+                            {
+                                commands.AddRange(Encoding.GetEncoding(850).GetBytes(headerSeparator + "\n"));
+                                isFirstRow = false;
+                            }
+                        }
+                        else
+                        {
+                            commands.AddRange(Encoding.GetEncoding(850).GetBytes(rowLine + "\n"));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        commands.AddRange(Encoding.GetEncoding(850).GetBytes($"║[Row Error: {ex.Message}]║\n"));
                     }
                 }
-                else
-                {
-                    commands.AddRange(Encoding.GetEncoding(850).GetBytes(line.ToString() + "\n"));
-                }
-            }
 
-            commands.AddRange(Encoding.GetEncoding(850).GetBytes(bottomBorder + "\n\n"));
+                commands.AddRange(Encoding.GetEncoding(850).GetBytes(bottomBorder + "\n\n"));
+
+                System.Diagnostics.Debug.WriteLine($"Table processed successfully: {rowCount} rows, {colCount} columns");
+            }
+            catch (Exception ex)
+            {
+                commands.AddRange(Encoding.GetEncoding(850).GetBytes($"[Table Error: {ex.Message}]\n"));
+                System.Diagnostics.Debug.WriteLine($"Table processing error: {ex.Message}");
+            }
         }
 
-
-        // FIXED: Proper image printing with bitmap
-        private void ProcessImageProper(HtmlNode img, List<byte> commands, EPSON printer)
+        private void ProcessImageFixed(HtmlNode img, List<byte> commands, EPSON printer)
         {
             try
             {
                 var src = img.GetAttributeValue("src", "");
                 if (!src.StartsWith("data:image/"))
                 {
-                    commands.AddRange(printer.Print("[Image not embedded]\n"));
+                    commands.AddRange(printer.Print("[No Image Data]\n"));
                     return;
                 }
 
@@ -891,18 +1119,38 @@ function clearAll() {
                 using (var ms = new MemoryStream(bytes))
                 using (var image = Image.FromStream(ms))
                 {
-                    // FIXED: Enhanced image processing for PC850 compatibility
-                    var processedBitmap = ConvertImageForPC850Printer(image);
+                    var bitmap = (Bitmap)image;
 
                     commands.AddRange(printer.CenterAlign());
 
-                    // FIXED: Use GS v 0 command for better image quality at 19200 baud
-                    PrintImageWithGSCommand(processedBitmap, commands);
+                    for (int y = 0; y < bitmap.Height; y++)
+                    {
+                        var lineData = new List<byte>();
+
+                        for (int x = 0; x < bitmap.Width; x += 8)
+                        {
+                            byte pixelByte = 0;
+                            for (int bit = 0; bit < 8 && x + bit < bitmap.Width; bit++)
+                            {
+                                var pixel = bitmap.GetPixel(x + bit, y);
+                                if (pixel.R == 0)
+                                    pixelByte |= (byte)(1 << (7 - bit));
+                            }
+                            lineData.Add(pixelByte);
+                        }
+
+                        if (lineData.Any(b => b != 0))
+                        {
+                            commands.Add(0x1B); commands.Add(0x2A); commands.Add(0x00);
+                            commands.Add((byte)(lineData.Count % 256));
+                            commands.Add((byte)(lineData.Count / 256));
+                            commands.AddRange(lineData);
+                        }
+                        commands.Add(0x0A);
+                    }
 
                     commands.AddRange(printer.LeftAlign());
                     commands.AddRange(printer.Print("\n"));
-
-                    processedBitmap.Dispose();
                 }
             }
             catch (Exception ex)
@@ -910,93 +1158,6 @@ function clearAll() {
                 commands.AddRange(printer.Print($"[Image Error: {ex.Message}]\n"));
             }
         }
-
-        // FIXED: Enhanced image conversion for PC850 printer
-        private Bitmap ConvertImageForPC850Printer(Image source)
-        {
-            // Optimal size for 58mm thermal printer at 203 DPI
-            int maxWidth = 384; // pixels for 58mm width
-            int width = Math.Min(source.Width, maxWidth);
-            int height = (int)(width * (double)source.Height / source.Width);
-
-            var resized = new Bitmap(source, width, height);
-            var monochrome = new Bitmap(width, height);
-
-            // FIXED: Enhanced Floyd-Steinberg dithering for better quality
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    var pixel = resized.GetPixel(x, y);
-
-                    // Convert to grayscale
-                    int gray = (int)(0.299 * pixel.R + 0.587 * pixel.G + 0.114 * pixel.B);
-
-                    // FIXED: Adaptive threshold for PC850 printer (adjust this value)
-                    int threshold = 120; // Lower = darker image, Higher = lighter image
-                    var color = gray < threshold ? Color.Black : Color.White;
-                    monochrome.SetPixel(x, y, color);
-                }
-            }
-
-            resized.Dispose();
-            return monochrome;
-        }
-
-        // FIXED: Use GS v 0 command for better image printing compatibility
-        private void PrintImageWithGSCommand(Bitmap bitmap, List<byte> commands)
-        {
-            int width = bitmap.Width;
-            int height = bitmap.Height;
-
-            // Calculate bytes per line (width must be multiple of 8)
-            int bytesPerLine = (width + 7) / 8;
-
-            // Convert bitmap to byte array
-            var imageData = new List<byte>();
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < bytesPerLine; x++)
-                {
-                    byte pixelByte = 0;
-
-                    for (int bit = 0; bit < 8; bit++)
-                    {
-                        int pixelX = x * 8 + bit;
-                        if (pixelX < width)
-                        {
-                            var pixel = bitmap.GetPixel(pixelX, y);
-                            if (pixel.R == 0) // Black pixel
-                                pixelByte |= (byte)(1 << (7 - bit));
-                        }
-                    }
-
-                    imageData.Add(pixelByte);
-                }
-            }
-
-            // FIXED: Use GS v 0 command for raster image (works better with PC850)
-            commands.Add(0x1D); // GS
-            commands.Add(0x76); // v
-            commands.Add(0x30); // 0 (raster bit image)
-            commands.Add(0x00); // m (normal mode)
-
-            // Width in bytes (xL, xH)
-            commands.Add((byte)(bytesPerLine & 0xFF));
-            commands.Add((byte)((bytesPerLine >> 8) & 0xFF));
-
-            // Height in pixels (yL, yH)
-            commands.Add((byte)(height & 0xFF));
-            commands.Add((byte)((height >> 8) & 0xFF));
-
-            // Image data
-            commands.AddRange(imageData);
-
-            // FIXED: Add small delay for 19200 baud rate
-            System.Threading.Thread.Sleep(50);
-        }
-
 
         private void RefreshPrinters()
         {
@@ -1025,13 +1186,12 @@ function clearAll() {
             this.AutoScaleMode = AutoScaleMode.Font;
             this.ClientSize = new Size(1000, 700);
             this.Name = "Form1";
-            this.Text = "58mm Thermal Printer Editor - FULLY WORKING";
+            this.Text = "58mm Thermal Printer Editor - WORKING WIDTH ADJUSTMENT & MATCHING FONTS";
             this.WindowState = FormWindowState.Maximized;
             this.ResumeLayout(false);
         }
     }
 
-    // Table dialog
     public class TableDialog : Form
     {
         public int Rows { get; private set; } = 2;
